@@ -1,0 +1,4 @@
+*.pub
+secrets.mk
+config
+*.tar.gz

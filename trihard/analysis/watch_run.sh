@@ -1,0 +1,1 @@
+watch -n $1 "analysis/analyze_run.sh $2"
