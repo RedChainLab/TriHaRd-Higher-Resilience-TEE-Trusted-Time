@@ -123,3 +123,16 @@ int ecall_get_timestamp(uint16_t _port, struct timespec* ts)
     //printf("%sTimestamp retrieved.\r\n", ENCLAVE_MGR);
     return SUCCESS;
 }
+
+int ecall_poll_timestamp(uint16_t _port, int count, int sleep_us)
+{
+    printf("%sPolling timestamp %d times with %d us sleep...\r\n", ENCLAVE_MGR, count, sleep_us);
+    if(nodes.find(_port) == nodes.end())
+    {
+        printf("%sNode does not exist...\r\n", ENCLAVE_MGR);
+        return SOCKET_ALREADY_EXISTS;
+    }
+    nodes[_port]->poll_timestamp(count, sleep_us);
+    printf("%sTimestamp polling finished.\r\n", ENCLAVE_MGR);
+    return SUCCESS;
+}

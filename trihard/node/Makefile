@@ -115,7 +115,7 @@ App_Link_Flags := -L$(SGX_LIBRARY_PATH) \
 
 App_Cpp_Objects := $(App_Cpp_Files:.cpp=.o)
 
-App_Name := libtriad.so
+App_Name := libtrihard.so
 
 ######## Enclave Settings ########
 

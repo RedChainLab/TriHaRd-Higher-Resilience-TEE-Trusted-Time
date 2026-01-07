@@ -395,23 +395,63 @@ void Node::print_timestamp()
 
 }
 
+void Node::encl_poll_timestamp(int count, int sleep_us)
+{
+    threads.emplace_back([this, count, sleep_us](){
+        int retval = 0;
+        sgx_status_t ret = ecall_poll_timestamp(enclave_id, &retval, port, count, sleep_us);
+        if (ret != SGX_SUCCESS) 
+        {
+            print_error_message(ret);
+        }
+    });
+}
+
 void Node::poll_timestamp(int count, int sleep_us, bool threaded)
 {
     if(threaded)
     {
         threads.emplace_back([this, count, sleep_us, stop=std::ref(this->stop)](){
-            for(int i=0; (count<0 || i<count) && !stop; i+=(count>=0)?1:0)
+            for(int i=0; (count<0 || i<count) && !stop; i++)
             {
-                print_timestamp();
+                long long int start = rdtscp();
+                timespec ts_node = this->get_timestamp();
+                long long int end = rdtscp();
+                long long int diff = end - start; // time in cycles
+
+                timespec ts_ref;
+                start = rdtscp();
+                timespec_get(&ts_ref, TIME_UTC);
+                end = rdtscp();
+                char buff[100];
+                strftime(buff, sizeof buff, "%D %T", gmtime(&(ts_ref.tv_sec)));
+                printf("%sRef. Time: %s.%09ld UTC %lld\n", getPrefix().c_str(), buff, ts_ref.tv_nsec, end - start);
+                strftime(buff, sizeof buff, "%D %T", gmtime(&(ts_node.tv_sec)));
+                printf("%sNode Time: %s.%09ld UTC %lld\n", getPrefix().c_str(), buff, ts_node.tv_nsec, diff);
+
                 if(sleep_us>0) usleep(sleep_us);
             }
         });
     }
     else
     {
-        for(int i=0; (count<0 || i<count) && !stop; i+=(count>=0)?1:0)
+        for(int i=0; (count<0 || i<count) && !stop; i++)
         {
-            print_timestamp();
+            long long int start = rdtscp();
+            timespec ts_node = this->get_timestamp();
+            long long int end = rdtscp();
+            long long int diff = end - start; // time in cycles
+
+            timespec ts_ref;
+            start = rdtscp();
+            timespec_get(&ts_ref, TIME_UTC);
+            end = rdtscp();
+            char buff[100];
+            strftime(buff, sizeof buff, "%D %T", gmtime(&(ts_ref.tv_sec)));
+            printf("%sRef. Time: %s.%09ld UTC %lld\n", getPrefix().c_str(), buff, ts_ref.tv_nsec, end - start);
+            strftime(buff, sizeof buff, "%D %T", gmtime(&(ts_node.tv_sec)));
+            printf("%sNode Time: %s.%09ld UTC %lld\n", getPrefix().c_str(), buff, ts_node.tv_nsec, diff);
+
             if(sleep_us>0) usleep(sleep_us);
         }
     }

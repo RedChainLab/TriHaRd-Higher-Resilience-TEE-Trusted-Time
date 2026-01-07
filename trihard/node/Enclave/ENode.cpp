@@ -97,11 +97,6 @@ inline void log_aex(long long int* arr, long long int& next_index, long long int
     }
 }
 
-inline double exponential_moving_average(double new_value, double old_value, double alpha)
-{
-    return (1-alpha)*old_value + alpha*new_value;
-}
-
 #ifdef USE_SGX2
 inline long long int rdtscp(void){
     /*
@@ -156,7 +151,7 @@ static void aex_handler(const sgx_exception_info_t *info, const void * args)
     {
         printf("[Handler %d]> Error: Negative TSC difference detected!\r\n", aex_args->port);
     }
-    else if(total_nsec>100000) // 100µs
+    else if(total_nsec>*aex_args->aex_panic_thresh)
     {
         printf("[Handler %d]> Error: Large TSC difference detected: %lldns!\r\n", aex_args->port, total_nsec);
     }
@@ -260,7 +255,7 @@ void ENode::refresh()
 ENode::ENode(int _port, double _tsc_freq, double _shadow_tsc_freq, int _sleep_attack_ms):port(_port), stop(false),
     add_count(0), total_aex_count(0), node_state(node_state::FREQ_STATE), clock_state(clock_state::TA_INCONSISTENT_STATE), clock_offset({0,0}), poll_exponent(2), calib_count(false),
     tainted(false), aex_count(0), monitor_aex_count(0), 
-    sock(-1), time_authority(std::make_pair(TA_IP,TA_PORT)),sleep_time(500), sleep_attack_ms(_sleep_attack_ms), verbosity(0), tsc_freq(_tsc_freq), shadow_tsc_freq(_shadow_tsc_freq), tsc_offset(0),
+    sock(-1), time_authority(std::make_pair(TA_IP,TA_PORT)), sleep_attack_ms(_sleep_attack_ms), verbosity(0), tsc_freq(_tsc_freq), shadow_tsc_freq(_shadow_tsc_freq), tsc_offset(0),
     monitor_stopped(false), refresh_stopped(false), trigger_stopped(false)
 {
     eprintf("Creating ENode instance...\r\n");
@@ -279,6 +274,8 @@ ENode::ENode(int _port, double _tsc_freq, double _shadow_tsc_freq, int _sleep_at
     aex_args.tainted = &tainted;
     aex_args.tainted_mutex = &tainted_mutex;
     aex_args.tainted_cond = &tainted_cond;
+
+    aex_args.aex_panic_thresh = &AEX_PANIC_THRESHOLD;
 
     aex_args.aex_count = &aex_count;
     aex_args.monitor_aex_count = &monitor_aex_count;
@@ -477,7 +474,8 @@ int ENode::loop_recvfrom()
                 eprintf("reading error...: %d\r\n", errno);
                 close(sock);
                 sock = -1;
-                return READING_ERROR;
+                setup_socket();
+                eprintf("Socket recreated.\r\n");
             }
         }
         else if(readStatus > 0)
@@ -541,7 +539,8 @@ int ENode::sendMessage(const void* buff, size_t buff_len, const char* ip, uint16
                 close(sock);
                 sock = -1;
                 sgx_thread_rwlock_unlock(&socket_rwlock);
-                return SENDING_ERROR;
+                setup_socket();
+                eprintf("Socket recreated.\r\n");
             }
         }
     } while (sendStatus < 0 && (errno == EWOULDBLOCK  || errno == EAGAIN) && !should_stop());
@@ -690,7 +689,7 @@ int ENode::handle_message(const void* buff, size_t buff_len, char* ip, uint16_t 
                     // use moving average of peer-consistencies with time discounting (i.e., a peer-consistent event raises consistency score, which then decays with time)
                     if(recvd_tainted_msg_count>sibling->last_ts_is_consistent.first)
                     {
-                        siblings[index].last_ts_is_consistent=std::make_pair(recvd_tainted_msg_count, peer_clock_offset<timespec{0,500*US});
+                        siblings[index].last_ts_is_consistent=std::make_pair(recvd_tainted_msg_count, peer_clock_offset<PEER_CONSISTENCY_DRIFT_THRESHOLD);
                         siblings[index].views_as_consistent=views_as_consistent;
                     }
                     else
@@ -779,58 +778,17 @@ int ENode::handle_message(const void* buff, size_t buff_len, char* ip, uint16_t 
                 if(node_state!=node_state::FREQ_STATE)
                 {
                     bool consistent=(fabs(to_double(clock_offset))<=(MAX_DRIFT_RATE*pow(2,(double)poll_exponent)));
-                    static int nb_polls=0;
-                    nb_polls++;
-                    for(int i=0; i<3; i++)
-                    {
-                        double best_score=1-pow((1-alphas[i]),nb_polls); // max value if consistent variable is always true
-                        if(verbosity>=1) eprintf("%.3f %.3f\r\n",best_score,pow((1-alphas[i]),nb_polls));
-                        ta_consistencies[i]=exponential_moving_average(consistent,ta_consistencies[i], alphas[i]);
-                        ta_consistency_scores[i]=ta_consistencies[i]/best_score;
-                    }
-                    if(verbosity>=1) eprintf("Consistencies: %.3f %.3f %.3f\r\n", ta_consistency_scores[0],ta_consistency_scores[1],ta_consistency_scores[2]);
-
-                    if(ta_consistency_scores[0]<TA_CONSISTENT_THRESHOLD)
-                    {
-                        clock_state=clock_state::TA_INCONSISTENT_STATE;
-                        print_state(callers::TA_INCONSISTENT);
-                    }
-                    else if (clock_state==clock_state::TA_INCONSISTENT_STATE)
+                    
+                    if(consistent)
                     {
                         clock_state=clock_state::TA_CONSISTENT_STATE;
                         print_state(callers::TA_CONSISTENT);
                     }
-                    
-                //     static double jitter=0;
-                //     jitter=fabs(to_double(clock_offset))*JITTER_EMA_ALPHA+jitter*(1-JITTER_EMA_ALPHA);
-                //     static long long int jiggle_counter=0;
-                //     if(verbosity>=1){
-                //         eprintf("Offset: %.6fs jitter: %.6fs\r\n", to_double(clock_offset),jitter);
-                //     }
-                //     if (fabs(to_double(clock_offset)) < CLOCK_PGATE * jitter) {
-                //         jiggle_counter += poll_exponent;
-                //         if (jiggle_counter > CLOCK_LIMIT) {
-                //             jiggle_counter = CLOCK_LIMIT;
-                //             if (poll_exponent < MAX_POLL_EXPONENT) {
-                //                 jiggle_counter = 0;
-                //                 poll_exponent++;
-                //                 eprintf("Increased poll_exponent to %d\r\n",poll_exponent);
-                //             }
-                //         }
-                //     } else {
-                //         jiggle_counter -= poll_exponent << 1;
-                //         if (jiggle_counter < -CLOCK_LIMIT) {
-                //             jiggle_counter = -CLOCK_LIMIT;
-                //             if (poll_exponent > MIN_POLL_EXPONENT) {
-                //                 jiggle_counter = 0;
-                //                 poll_exponent--;
-                //                 eprintf("Decreased poll_exponent to %d\r\n",poll_exponent);
-                //             }
-                //         }
-                //     }
-                //     if(verbosity>=1){
-                //         eprintf("Jiggle %lld\r\n",jiggle_counter);
-                //     }
+                    else
+                    {
+                        clock_state=clock_state::TA_INCONSISTENT_STATE;
+                        print_state(callers::TA_INCONSISTENT);
+                    }
                 }
 
                 if(verbosity>=1)
@@ -847,8 +805,47 @@ int ENode::handle_message(const void* buff, size_t buff_len, char* ip, uint16_t 
 
                 eprintf("NTP state %d %.9f\r\n", node_state, to_double(clock_offset));
 
-                select_clock();
+                // if(node_state!=node_state::FREQ_STATE)
+                // {
+                //     timespec ta_ref_ts=(rec_ts+xmt_ts)/2;
+                //     timespec node_ref_ts=(org_ts+recv_ts)/2;
 
+                //     double recent_drift_ratio=to_double(node_ref_ts-ts_after_last_update)/(to_double(ta_ref_ts-last_recvd_ta_ts));
+                //     double recent_drift_rate=recent_drift_ratio-1;
+                //     eprintf("Recent drift ratio: %.9f\r\n", recent_drift_ratio);
+                //     eprintf("Recent drift rate: %.9f\r\n", recent_drift_rate);
+
+                //     // Measure expected time to exceed drift threshold:
+                //     // Update selftainting_rounds so that |selftainting_rounds*monitor_time*recent_drift_rate+clock_offset| < SELFTAINTING_DRIFT_THRESHOLD
+                    
+                //     if(clock_offset>=SELFTAINTING_DRIFT_THRESHOLD || clock_offset<=-SELFTAINTING_DRIFT_THRESHOLD)
+                //     {
+                //         selftainting_rounds=0;
+                //     }
+                //     else
+                //     {
+                //         if(recent_drift_rate>0)
+                //         {
+                //             selftainting_rounds=std::max(0,std::min(MAX_UNINTERRUPTED_ROUNDS,to_double(SELFTAINTING_DRIFT_THRESHOLD-clock_offset)/(monitor_time*recent_drift_rate)));
+                //         }
+                //         else if(recent_drift_rate<0)
+                //         {
+                //             selftainting_rounds=std::max(0,std::min(MAX_UNINTERRUPTED_ROUNDS,-to_double(SELFTAINTING_DRIFT_THRESHOLD+clock_offset)/(monitor_time*recent_drift_rate)));
+                //         }
+                //         else
+                //         {
+                //             selftainting_rounds=MAX_UNINTERRUPTED_ROUNDS;
+                //         }
+                //     }
+
+                //     eprintf("Self-tainting rounds: %lld\r\n", selftainting_rounds);
+
+                //     last_recvd_ta_ts=ta_ref_ts;
+                //     ts_after_last_update=node_ref_ts;
+                // }
+                
+                select_clock();
+                
                 sgx_thread_mutex_lock(&calib_mutex);
                 calib_recvd[recvd_calib_msg_count%NB_CALIB_MSG]={recvd_calib_msg_count, total_aex_count,tsc};
                 sgx_thread_mutex_unlock(&calib_mutex);
@@ -942,7 +939,7 @@ void ENode::send_recv_drift_message(int sleep_time_ms, int sleep_ms)
 bool ENode::monitor_rdtsc()
 {
     long long int start_tsc=rdtscp();
-    long long int stop_tsc=((long long int)(tsc_freq*1000000))*sleep_time+start_tsc;
+    long long int stop_tsc=((long long int)(tsc_freq*1000000))*monitor_time+start_tsc;
 #ifdef USE_AEX_NOTIFY
     #ifndef USE_SGX2
     printf("[Handler %d]> CODE DOES NOT YET SUPPORT SGX1+AEX\r\n", port);
@@ -973,13 +970,16 @@ bool ENode::monitor_rdtsc()
     else{
         nb_uninterr_rounds=0;
     }
-    if(nb_uninterr_rounds>MAX_UNINTERRUPTED_ROUNDS)
+    if(nb_uninterr_rounds>selftainting_rounds)
     {
         if(verbosity>=1) eprintf("Self-tainting...\r\n");
         nb_uninterr_rounds=0;
         total_aex_count++;
         print_state(HANDLER);
+        sgx_thread_mutex_lock(&tainted_mutex);
         tainted = true;
+        sgx_thread_cond_signal(&tainted_cond);
+        sgx_thread_mutex_unlock(&tainted_mutex);
         print_state(TAINTED);
     }
     double ACCURACY=0.05;
@@ -1040,13 +1040,16 @@ bool ENode::monitor_rdtsc()
         else
         {
             nb_uninterr_rounds++;
-            if(nb_uninterr_rounds>MAX_UNINTERRUPTED_ROUNDS)
+            if(nb_uninterr_rounds>selftainting_rounds)
             {
                 eprintf("Self-tainting...\r\n");
                 nb_uninterr_rounds=0;
                 total_aex_count++;
                 print_state(HANDLER);
+                sgx_thread_mutex_lock(&tainted_mutex);
                 tainted = true;
+                sgx_thread_cond_signal(&tainted_cond);
+                sgx_thread_mutex_unlock(&tainted_mutex);
                 print_state(TAINTED);
             }
         }
@@ -1095,12 +1098,13 @@ void ENode::monitor(){
         aex_count=0;
         monitor_aex_count=0;
         
-        static bool even = false;
-        if(even)
+        static int ntp_step = 0;
+        if(ntp_step%(1000/monitor_time)==0)
         {
             ntp();
+            ntp_step=0;
         }
-        even = !even;
+        ntp_step++;
     }
 #ifdef USE_AEX_NOTIFY
     sgx_unregister_aex_handler(aex_handler);
@@ -1296,6 +1300,31 @@ timespec ENode::get_timestamp(bool force)
     return timestamp;
 }
 
+void ENode::poll_timestamp(int count, int sleep_us)
+{
+    if(verbosity>=1) eprintf("Polling timestamp %d times with %dus sleep...\r\n", count, sleep_us);
+    for(int i=0; (count<0 || i<count) && !should_stop(); i++)
+    {
+        long long int start_node=rdtscp();
+        timespec ts_node=get_timestamp();
+        long long int end_node=rdtscp();
+
+        timespec ts_os;
+        long long int start_os=rdtscp();
+        ocall_timespec_get(&ts_os);
+        long long int end_os=rdtscp();
+
+        ocall_timespec_cycles_print(&ts_node, this->port, ENODE_TS, end_node-start_node);
+        ocall_timespec_cycles_print(&ts_os, this->port, REF_TS, end_os-start_os);
+
+        if(sleep_us>0)
+        {
+            ocall_usleep(sleep_us);
+        }
+    }
+    if(verbosity>=1) eprintf("Polling done.\r\n");
+}
+
 void ENode::shadow_tsc_update()
 {
     if(attacker)
@@ -1313,7 +1342,7 @@ void ENode::shadow_tsc_update()
             {
                 printf("[Handler %d]> Error: Negative TSC difference detected!\r\n", port);
             }
-            else if(21000+total_nsec>100000) // 100µs + AEX duration
+            else if(21000+total_nsec>AEX_PANIC_THRESHOLD)
             {
                 printf("[Handler %d]> Error: Large TSC difference detected: %lldns!\r\n", port, total_nsec);
             }

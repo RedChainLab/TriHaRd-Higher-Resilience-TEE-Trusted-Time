@@ -16,7 +16,9 @@ typedef enum callers{
     FREQ=10,
     SPIK=11,
     SYNC=12,
-    INFO=100
+    INFO=100,
+    ENODE_TS=200,
+    REF_TS=201
 } callers_t;
 
 #ifdef __cplusplus
@@ -114,6 +116,26 @@ void ocall_timespec_print(const struct timespec* ts, int id, int caller) {
             break;
         case INFO:
             printf("[utrst-%s %d]> TS Time: %s.%09ld UTC\n", "INFO", id, buff, ts->tv_nsec);
+            break;
+        default:
+            printf("[utrst-%s %d]> TS Time: %s.%09ld UTC\n", "Unknown", id, buff, ts->tv_nsec);
+            break;
+    }
+}
+
+void ocall_timespec_cycles_print(const struct timespec* ts, int id, int caller, long long int cycles) {
+    /*
+    Print the time
+    */
+    char buff[100];
+    strftime(buff, sizeof buff, "%D %T", gmtime(&(ts->tv_sec)));
+    switch(caller)
+    {
+        case ENODE_TS:
+            printf("[utrst-%s %d]> Node Time: %s.%09ld UTC %lld\n", "ENode", id, buff, ts->tv_nsec, cycles);
+            break;
+        case REF_TS:
+            printf("[utrst-%s %d]> Ref. Time: %s.%09ld UTC %lld\n", "ENode", id, buff, ts->tv_nsec, cycles);
             break;
         default:
             printf("[utrst-%s %d]> TS Time: %s.%09ld UTC\n", "Unknown", id, buff, ts->tv_nsec);

@@ -88,7 +88,9 @@ typedef enum callers{
     FREQ=10,
     SPIK=11,
     SYNC=12,
-    INFO=100
+    INFO=100,
+    ENODE_TS=200,
+    REF_TS=201
 } callers_t;
 
 const int PEER_REGISTER_SIZE = 8;
@@ -108,6 +110,8 @@ typedef struct {
     bool* tainted;
     sgx_thread_mutex_t* tainted_mutex;
     sgx_thread_cond_t* tainted_cond;
+
+    const long long int* aex_panic_thresh;
 
     long long int* aex_count;
     long long int* monitor_aex_count;
@@ -152,13 +156,16 @@ public:
     long long int add_count;
     long long int total_aex_count;
     long long int nb_uninterr_rounds;
-    const long long int MAX_UNINTERRUPTED_ROUNDS = 0;
+    long long int selftainting_rounds = 100; // uninterrupted monitoring rounds, default: 10
+
+    const long long int MAX_UNINTERRUPTED_ROUNDS = 100; // maximum number of uninterrupted monitoring rounds before self-tainting, default: 1000
+    const timespec SELFTAINTING_DRIFT_THRESHOLD = {0, 100000}; // [ns] default: 100µs
+    const long long int AEX_PANIC_THRESHOLD = 100000; // [ns] default: 100µs
+
+    const timespec PEER_CONSISTENCY_DRIFT_THRESHOLD = {0,500000}; // [ns] default: 500µs
 
     node_state_t node_state;
     clock_state_t clock_state;
-
-    const double TA_CONSISTENT_THRESHOLD = 0.95;
-    const double PEER_CONSISTENT_THRESHOLD = 0.95;
 
     //NTP constants
     const long long STEP_OUT_THRESHOLD_S = 100; // [s] default: 300s
@@ -183,10 +190,8 @@ public:
     long long int poll_exponent;
     long long int freq_count;
 
-    double alphas[3]={0.1, 0.01, 0.001};
-    double ta_consistencies[3]={0, 0, 0};
-    double ta_consistency_scores[3]={0, 0, 0};
-    const double PEER_EMA_TAU=10; // [s] default: 0.1s
+    timespec ts_after_last_update;
+    timespec last_recvd_ta_ts;
 
     bool calib_count;
     bool tainted;
@@ -217,6 +222,7 @@ public:
     int add_sibling(std::string hostname, uint16_t port);
 
     timespec get_timestamp(bool force=false);
+    void poll_timestamp(int count, int sleep_us=1000000);
 
     void shadow_tsc_update();
 
@@ -228,7 +234,7 @@ private:
 
     std::pair<std::string, uint16_t> time_authority;
 
-    int sleep_time;
+    int monitor_time=500; // [ms] default: 500ms
     int sleep_attack_ms;
     int verbosity;
 

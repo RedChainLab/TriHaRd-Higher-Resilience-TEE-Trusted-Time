@@ -75,11 +75,11 @@ int main(int argc, char* argv[]) {
     if(n_nodes>3) node4->bench_lat_timestamp();
 #endif // SINGLE_HOST
 #else
-    node->poll_timestamp(-1, POLL_PERIOD);
+    node->encl_poll_timestamp(-1, POLL_PERIOD);
 #ifdef SINGLE_HOST
-    if(n_nodes>1) node2->poll_timestamp(-1, POLL_PERIOD);
-    if(n_nodes>2) node3->poll_timestamp(-1, POLL_PERIOD);
-    if(n_nodes>3) node4->poll_timestamp(-1, POLL_PERIOD);
+    if(n_nodes>1) node2->encl_poll_timestamp(-1, POLL_PERIOD);
+    if(n_nodes>2) node3->encl_poll_timestamp(-1, POLL_PERIOD);
+    if(n_nodes>3) node4->encl_poll_timestamp(-1, POLL_PERIOD);
 #endif // SINGLE_HOST
 #endif
 

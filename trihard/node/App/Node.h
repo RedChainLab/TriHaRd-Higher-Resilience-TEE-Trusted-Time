@@ -16,6 +16,7 @@ public:
     timespec get_timestamp();
     void print_timestamp();
     void poll_timestamp(int count, int sleep_time_us=1000000, bool threaded=true);
+    void encl_poll_timestamp(int count, int sleep_time_us=1000000);
     void bench_timestamp();
     void bench_lat_timestamp();
     int add_sibling(const std::string& hostname, uint16_t port);

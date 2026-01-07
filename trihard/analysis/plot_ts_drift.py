@@ -14,17 +14,8 @@ plt.rcParams.update(params)
 # x-axis params
 MAJOR_TICKS=600 #240 #600 #60
 MINOR_TICKS=100 #60 #100 #10
-MAX_TIME=1800 # None # 1800 #
-MIN_TIME=0 # 0 # 100 # None #
 LOW_INTERRUPTS = False
-
-YLIM_POS=1
-YLIM_NEG=-1
-
-INITIAL_DRIFTS = {"12345]>":0,#.000227582,
-                  "12346]>":0,#.000399069,
-                  "12347]>":0,#.000006205
-                  }
+TSC_FREQ=2.899999e9
 
 # Files in out/count directory are in the naming format count-<timestamp>-<sgx_type>-<sleep_type>-<sleep_time_secs>-<repeat_id>.csv
 # Get <sleep_type> <sleep_time_secs> from command line arguments
@@ -76,50 +67,56 @@ except Exception as e:
 # print(ut_ta_df)
 # print(states_df)
 
+FORMAT="%m/%d/%y %H:%M:%S.%f"
+
 aex_df.drop(columns=[0,3], inplace=True)
 aex_df.columns = ['ID','type', 'date', "time","TZ"]
-aex_df["datetime"]=pd.to_datetime(aex_df["date"]+" "+aex_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+aex_df["datetime"]=pd.to_datetime(aex_df["date"]+" "+aex_df["time"],format=FORMAT)
 # print(aex_df)
 
 ut_ta_df.drop(columns=[0,3], inplace=True)
 ut_ta_df.columns = ['ID','type', 'date', "time","TZ"]
-ut_ta_df["datetime"]=pd.to_datetime(ut_ta_df["date"]+" "+ut_ta_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+ut_ta_df["datetime"]=pd.to_datetime(ut_ta_df["date"]+" "+ut_ta_df["time"],format=FORMAT)
 # print(ut_ta_df)
 
 ut_node_df.drop(columns=[0,3], inplace=True)
 ut_node_df.columns = ['ID','type', 'date', "time","TZ"]
-ut_node_df["datetime"]=pd.to_datetime(ut_node_df["date"]+" "+ut_node_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+ut_node_df["datetime"]=pd.to_datetime(ut_node_df["date"]+" "+ut_node_df["time"],format=FORMAT)
 # print(ut_node_df)
 
 states_df.drop(columns=[0,3], inplace=True)
 states_df.columns = ['ID','type', 'date', "time","TZ"]
-states_df["datetime"]=pd.to_datetime(states_df["date"]+" "+states_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+states_df["datetime"]=pd.to_datetime(states_df["date"]+" "+states_df["time"],format=FORMAT)
 states_df["type"].replace({"OK": 0, "Tainted": 1, "FullCalib":2}, inplace=True)
 # print(states_df)
 
 clock_states_df.drop(columns=[0,3], inplace=True)
 clock_states_df.columns = ['ID','type', 'date', "time","TZ"]
-clock_states_df["datetime"]=pd.to_datetime(clock_states_df["date"]+" "+clock_states_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+clock_states_df["datetime"]=pd.to_datetime(clock_states_df["date"]+" "+clock_states_df["time"],format=FORMAT)
 clock_states_df["type"].replace({"TAInconsistent": 0, "TAConsistent": 1}, inplace=True)
 # print(clock_states_df)
 
 node_states_df.drop(columns=[0,3], inplace=True)
 node_states_df.columns = ['ID','type', 'date', "time","TZ"]
-node_states_df["datetime"]=pd.to_datetime(node_states_df["date"]+" "+node_states_df["time"],format="%d/%m/%y %H:%M:%S.%f")
+node_states_df["datetime"]=pd.to_datetime(node_states_df["date"]+" "+node_states_df["time"],format=FORMAT)
 node_states_df["type"].replace({"Sync": 1, "Freq":0}, inplace=True)
 # print(node_states_df)
 
 df.drop(columns=[0,3], inplace=True)
-df.columns = ['ID','type', 'date', "time","TZ"]
+df.columns = ['ID','type', 'date', "time","TZ", "cycles"]
 node_ts = df[df['type'] == 'Node'].reset_index(drop=True)
 ref_ts = df[df['type'] == 'Ref.'].reset_index(drop=True)
 merged=node_ts.join(ref_ts, lsuffix='_node', rsuffix='_ref')
 merged.drop(columns=['type_node', 'type_ref', 'TZ_node', 'TZ_ref'], inplace=True)
 merged=merged[~merged["time_node"].str.contains("-")].dropna()
-merged["datetime_node"]=pd.to_datetime(merged["date_node"]+" "+merged["time_node"],format="%d/%m/%y %H:%M:%S.%f")
-merged["datetime_ref"]=pd.to_datetime(merged["date_ref"]+" "+merged["time_ref"],format="%d/%m/%y %H:%M:%S.%f")
+merged["datetime_node"]=pd.to_datetime(merged["date_node"]+" "+merged["time_node"],format=FORMAT)
+merged["datetime_ref"]=pd.to_datetime(merged["date_ref"]+" "+merged["time_ref"],format=FORMAT)
 merged.drop(columns=["date_node", "time_node", "date_ref", "time_ref"], inplace=True)
 merged["drift"]=(merged["datetime_node"]-merged["datetime_ref"])/pd.Timedelta('1ms')
+merged["cycles_node"]=merged["cycles_node"].astype(float)
+# merged["cycles_node"]=merged["cycles_node"] / TSC_FREQ
+merged["cycles_ref"]=merged["cycles_ref"].astype(float)
+# merged["cycles_ref"]=merged["cycles_ref"] / TSC_FREQ
 
 ref_datetime=min(merged["datetime_ref"].min(),aex_df["datetime"].min(),ut_ta_df["datetime"].min(),ut_node_df["datetime"].min())
 
@@ -131,33 +128,14 @@ states_df["datetime"]=(states_df["datetime"]-ref_datetime)/pd.Timedelta('1s')
 clock_states_df["datetime"]=(clock_states_df["datetime"]-ref_datetime)/pd.Timedelta('1s')
 node_states_df["datetime"]=(node_states_df["datetime"]-ref_datetime)/pd.Timedelta('1s')
 
-if MAX_TIME is not None:
-  merged=merged[merged["datetime_ref"] < MAX_TIME]
-  aex_df=aex_df[aex_df["datetime"] < MAX_TIME]
-  ut_ta_df=ut_ta_df[ut_ta_df["datetime"] < MAX_TIME]
-  ut_node_df=ut_node_df[ut_node_df["datetime"] < MAX_TIME]
-  states_df=states_df[states_df["datetime"] < MAX_TIME]
-  clock_states_df=clock_states_df[clock_states_df["datetime"] < MAX_TIME]
-  node_states_df=node_states_df[node_states_df["datetime"] < MAX_TIME]
-
-if MIN_TIME is not None:
-  merged=merged[merged["datetime_ref"] > MIN_TIME]
-  aex_df=aex_df[aex_df["datetime"] > MIN_TIME]
-  ut_ta_df=ut_ta_df[ut_ta_df["datetime"] > MIN_TIME]
-  ut_node_df=ut_node_df[ut_node_df["datetime"] > MIN_TIME]
-  states_df=states_df[states_df["datetime"] > MIN_TIME]
-  clock_states_df=clock_states_df[clock_states_df["datetime"] > MIN_TIME]
-  node_states_df=node_states_df[node_states_df["datetime"] > MIN_TIME]
-
-# print(merged["ID_node"].unique())
-# # Adjust the first drift for each node based on INITIAL_DRIFTS
-# for node_id, initial_drift in INITIAL_DRIFTS.items():
-#   node_mask = merged["ID_node"] == node_id
-#   if node_mask.any():
-#     first_actual_drift = merged.loc[node_mask, "drift"].iloc[0]
-#     drift_offset = initial_drift - first_actual_drift
-#     print(drift_offset)
-#     merged.loc[node_mask, "drift"] += drift_offset
+# Filter data to keep only rows where datetime is greater than 100 seconds, i.e., after switch from FREQ->SYNC state
+# merged = merged[merged["datetime_ref"] < 600]
+# aex_df = aex_df[aex_df["datetime"] > 100]
+# ut_ta_df = ut_ta_df[ut_ta_df["datetime"] > 100]
+# ut_node_df = ut_node_df[ut_node_df["datetime"] > 100]
+states_df = states_df[(states_df["datetime"] > 150) & (states_df["datetime"] < 600)]
+# clock_states_df = clock_states_df[clock_states_df["datetime"] > 100]
+# node_states_df = node_states_df[node_states_df["datetime"] > 100]
 
 mem_aex_df=aex_df.copy()
 
@@ -192,13 +170,13 @@ new_rows['datetime'] = merged["datetime_ref"].max() + 1
 node_states_df = pd.concat([node_states_df, new_rows], ignore_index=True)
 
 # print(node_ts, ref_ts, merged)
-NB_FIGS=7
+NB_FIGS=9
 fig_ax = [plt.subplots(figsize=(4.5,1.5)) for _ in range(NB_FIGS)]
 
 fig, ax = zip(*fig_ax)
 
-colors=["tab:blue","tab:orange","black"][::-1]
-linestyles=["-","--",":","-."]
+colors=["black","tab:orange","tab:blue"]
+linestyles=[":","--","-"]
 for (idx, group), color in zip(enumerate(merged.groupby("ID_node")), colors):
   ax[0].plot(group[1]["datetime_ref"], group[1]["drift"], marker='+', markersize=3, linestyle="-", linewidth=0.5, label=f"Node {1+int(group[0][:-2])%12345}", color=color,
              #zorder=4-idx
@@ -228,13 +206,21 @@ for (idx, group), color, linestyle in zip(enumerate(node_states_df.groupby("ID")
             #  zorder=4-idx
             )
 
+for (idx, group), color in zip(enumerate(merged.groupby("ID_node")), colors):
+  ax[7].plot(group[1]["datetime_ref"].iloc[1:], group[1]["cycles_node"].iloc[1:], marker='o', markersize=3, linestyle="None", color=color, label=f"Node {1+int(group[0][:-2])%12345} cycles",
+             #zorder=4-idx
+             )
+
+for (idx, group), color in zip(enumerate(merged.groupby("ID_node")), colors):
+  ax[8].plot(group[1]["datetime_ref"].iloc[1:], group[1]["cycles_ref"].iloc[1:], marker='o', markersize=3, linestyle="None", color=color, label=f"Node {1+int(group[0][:-2])%12345} cycles",
+             #zorder=4-idx
+             )
+
 for a in ax:
   a.grid(True)
   a.grid(which='minor', linestyle=':', linewidth='0.5')
   a.grid(which='major', linestyle='-', linewidth='0.5')
   a.minorticks_on()
-
-ax[0].set_ylim(YLIM_NEG, YLIM_POS)
 
 ax[3].set_ylim(-100)
 
@@ -253,6 +239,11 @@ ax[6].set_yticks([0,1])
 ax[6].set_yticklabels(["FREQ","SYNC"])
 ax[6].minorticks_on()
 
+ax[7].set_yscale('log')
+# ax[7].set_ylim(1e4, 1e5)
+ax[8].set_yscale('log')
+# ax[8].set_ylim(1e-6, 1e-3)
+
 for axis in ax:
   axis.set_xlabel('Reference time (s)')
   axis.set_xticks(np.arange(0, min(3601,math.ceil(merged["datetime_ref"].max()+1)), MAJOR_TICKS))
@@ -266,6 +257,8 @@ ax[3].set_ylabel('Peer response count')
 ax[4].set_ylabel('AEX state')
 ax[5].set_ylabel('Clock state')
 ax[6].set_ylabel('Node state')
+ax[7].set_ylabel('Node cycles')
+ax[8].set_ylabel('Ref. cycles')
 # ax[0].set_xlim(0)
 ax[2].legend(loc='lower right', fontsize='small')
 ax[1].legend(loc='lower right', fontsize='small')
@@ -275,7 +268,7 @@ for vline in vlines:
   for a in ax:
     a.axvline(x=vline, color='r', linestyle='--', zorder=100)
 
-suffixes=["drift","aex","ut-ta","ut-node","states","clock-states","node-states"]
+suffixes=["drift","aex","ut-ta","ut-node","states","clock-states","node-states","node-cycles","ref-cycles"]
 for f,suffix in zip(fig,suffixes):
   f.savefig(f'fig/{file}-{suffix}.pdf', bbox_inches='tight', dpi=1200)
 
@@ -325,7 +318,7 @@ ax2.set_xlabel('Node ID')
 ax2.set_xticks(index + 1.5 * bar_width)
 ax2.set_xticklabels(state_durations_df_normalized.index)
 ax2.set_ylabel('Duration (\\%)')
-ax2.set_ylim(0.01, 100)
+ax2.set_ylim(0.0001, 100)
 ax2.set_yscale('log')
 ax2.grid(axis='y', linestyle='-', linewidth='0.5')
 ax2.grid(axis='y', which='minor', linestyle=':', linewidth='0.5')
@@ -446,61 +439,61 @@ else:
   # ax3.set_xscale('log')
 
 handles, labels = ax3.get_legend_handles_labels()
-ax3.legend(handles, labels, loc='upper left', fontsize='small')
+ax3.legend(handles[::-1], labels, loc='upper left', fontsize='small')
 fig3.savefig(f'fig/{file}-aex-delays-histogram.pdf', bbox_inches='tight', dpi=1200)
 
-# Calculate delays between successive rows in merged dataframe's Node Time
-merged["node_time_delay"] = merged["datetime_node"].groupby(merged["ID_node"]).diff().fillna(0)
+# # Calculate delays between successive rows in merged dataframe's Node Time
+# merged["node_time_delay"] = merged["datetime_node"].groupby(merged["ID_node"]).diff().fillna(0)
 
-# Plot histogram of Node Time delays
-POLL_PERIOD = 1 #[s]
-MIN_POWER_X = 5
-MIN_POWER_Y = 5
+# # Plot histogram of Node Time delays
+# POLL_PERIOD = 1 #[s]
+# MIN_POWER_X = 5
+# MIN_POWER_Y = 5
 
-fig4, ax4 = plt.subplots(figsize=(4.5, 1.5))
-merged=merged[merged["node_time_delay"] != 0]
-merged["node_time_delay"] = merged["node_time_delay"].apply(lambda x: x.total_seconds()-POLL_PERIOD)
-for group, color, linestyle in zip(merged.groupby("ID_node"), colors, linestyles):
-  hist_values, bin_edges = np.histogram(group[1]["node_time_delay"], bins=100, density=True)
-  cumulative_values = 1-np.cumsum(hist_values * np.diff(bin_edges))
-  ax4.step(bin_edges[:-1], cumulative_values, color=color, linestyle=linestyle, label=f"Node {1+int(group[0][:-2])%12345}")
-ax4.set_xlabel('Additional delay between successive TS polls (s)')
-ax4.set_ylabel('Cumulative frequency')
-ax4.grid(True)
-ax4.grid(which='minor', linestyle=':', linewidth='0.5')
-ax4.grid(which='major', linestyle='-', linewidth='0.5')
-ax4.set_yscale("log")
-ax4.set_xscale("log")
-ax4.set_xlim(1/10**MIN_POWER_X,1)
-ax4.set_ylim(1/10**MIN_POWER_Y,1)
-ax4.set_yticks([1/10**y for y in range(1, MIN_POWER_Y+1)][::-1])
-ax4.set_yticklabels(['{:.7f}'.format((1-x)) for x in ax4.get_yticks()])
+# fig4, ax4 = plt.subplots(figsize=(4.5, 1.5))
+# merged=merged[merged["node_time_delay"] != 0]
+# merged["node_time_delay"] = merged["node_time_delay"].apply(lambda x: x.total_seconds()-POLL_PERIOD)
+# for group, color, linestyle in zip(merged.groupby("ID_node"), colors, linestyles):
+#   hist_values, bin_edges = np.histogram(group[1]["node_time_delay"], bins=100, density=True)
+#   cumulative_values = 1-np.cumsum(hist_values * np.diff(bin_edges))
+#   ax4.step(bin_edges[:-1], cumulative_values, color=color, linestyle=linestyle, label=f"Node {1+int(group[0][:-2])%12345}")
+# ax4.set_xlabel('Additional delay between successive TS polls (s)')
+# ax4.set_ylabel('Cumulative frequency')
+# ax4.grid(True)
+# ax4.grid(which='minor', linestyle=':', linewidth='0.5')
+# ax4.grid(which='major', linestyle='-', linewidth='0.5')
+# ax4.set_yscale("log")
+# ax4.set_xscale("log")
+# ax4.set_xlim(1/10**MIN_POWER_X,1)
+# ax4.set_ylim(1/10**MIN_POWER_Y,1)
+# ax4.set_yticks([1/10**y for y in range(1, MIN_POWER_Y+1)][::-1])
+# ax4.set_yticklabels(['{:.7f}'.format((1-x)) for x in ax4.get_yticks()])
 
-handles, labels = ax4.get_legend_handles_labels()
-ax4.legend(handles, labels, loc='upper right', fontsize='small')
-fig4.savefig(f'fig/{file}-node-time-delays-histogram.pdf', bbox_inches='tight', dpi=1200)
+# handles, labels = ax4.get_legend_handles_labels()
+# ax4.legend(handles, labels, loc='upper right', fontsize='small')
+# fig4.savefig(f'fig/{file}-node-time-delays-histogram.pdf', bbox_inches='tight', dpi=1200)
 
-# Calculate delays between successive rows in merged dataframe's Reference Time
-merged["ref_time_delay"] = merged["datetime_ref"].groupby(merged["ID_node"]).diff().fillna(0)
-merged["ref_time_delay"] = merged["ref_time_delay"].apply(lambda x: x-POLL_PERIOD)
-# Plot histogram of Reference Time delays
-fig5, ax5 = plt.subplots(figsize=(4.5, 1.5))
-for group, color, linestyle in zip(merged.groupby("ID_node"), colors, linestyles):
-  hist_values, bin_edges = np.histogram(group[1]["ref_time_delay"], bins=100, density=True)
-  cumulative_values = 1 - np.cumsum(hist_values * np.diff(bin_edges))
-  ax5.step(bin_edges[:-1], cumulative_values, color=color, linestyle=linestyle, label=f"Node {1+int(group[0][:-2])%12345}")
-ax5.set_xlabel('Delay between successive Reference Time polls (s)')
-ax5.set_ylabel('Cumulative frequency')
-ax5.grid(True)
-ax5.grid(which='minor', linestyle=':', linewidth='0.5')
-ax5.grid(which='major', linestyle='-', linewidth='0.5')
-ax5.set_yscale("log")
-ax5.set_xscale("log")
-ax5.set_xlim(1 / 10**MIN_POWER_X, 1)
-ax5.set_ylim(1/10**MIN_POWER_Y, 1)
-ax5.set_yticks([1/10**y for y in range(1, MIN_POWER_Y+1)][::-1])
-ax5.set_yticklabels(['{:.7f}'.format((1 - x)) for x in ax5.get_yticks()])
+# # Calculate delays between successive rows in merged dataframe's Reference Time
+# merged["ref_time_delay"] = merged["datetime_ref"].groupby(merged["ID_node"]).diff().fillna(0)
+# merged["ref_time_delay"] = merged["ref_time_delay"].apply(lambda x: x-POLL_PERIOD)
+# # Plot histogram of Reference Time delays
+# fig5, ax5 = plt.subplots(figsize=(4.5, 1.5))
+# for group, color, linestyle in zip(merged.groupby("ID_node"), colors, linestyles):
+#   hist_values, bin_edges = np.histogram(group[1]["ref_time_delay"], bins=100, density=True)
+#   cumulative_values = 1 - np.cumsum(hist_values * np.diff(bin_edges))
+#   ax5.step(bin_edges[:-1], cumulative_values, color=color, linestyle=linestyle, label=f"Node {1+int(group[0][:-2])%12345}")
+# ax5.set_xlabel('Delay between successive Reference Time polls (s)')
+# ax5.set_ylabel('Cumulative frequency')
+# ax5.grid(True)
+# ax5.grid(which='minor', linestyle=':', linewidth='0.5')
+# ax5.grid(which='major', linestyle='-', linewidth='0.5')
+# ax5.set_yscale("log")
+# ax5.set_xscale("log")
+# ax5.set_xlim(1 / 10**MIN_POWER_X, 1)
+# ax5.set_ylim(1/10**MIN_POWER_Y, 1)
+# ax5.set_yticks([1/10**y for y in range(1, MIN_POWER_Y+1)][::-1])
+# ax5.set_yticklabels(['{:.7f}'.format((1 - x)) for x in ax5.get_yticks()])
 
-handles, labels = ax5.get_legend_handles_labels()
-ax5.legend(handles, labels, loc='upper right', fontsize='small')
-fig5.savefig(f'fig/{file}-ref-time-delays-histogram.pdf', bbox_inches='tight', dpi=1200)
+# handles, labels = ax5.get_legend_handles_labels()
+# ax5.legend(handles, labels, loc='upper right', fontsize='small')
+# fig5.savefig(f'fig/{file}-ref-time-delays-histogram.pdf', bbox_inches='tight', dpi=1200)
