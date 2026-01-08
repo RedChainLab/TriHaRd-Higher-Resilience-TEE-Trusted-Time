@@ -1,8 +1,8 @@
-# TriHaRd: Higher Resilience for TEE Trusted Time
+# TriHaRd: Higher Resilience for TEE Trusted Time (INFOCOM'26)
 
 This repository contains the source code, as well as deployment and analysis scripts, for the "TriHaRd: Higher Resilience for TEE Trusted Time" paper, accepted for publication at the INFOCOM'26 conference.
 
-See this twin repository for the [Triad source code fork](https://github.com/RedChainLab/Triad-TEE-Trusted-Time).
+See this twin repository for the [Triad source code](https://github.com/RedChainLab/Triad-TEE-Trusted-Time).
 
 ## Contents
 
