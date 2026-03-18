@@ -1,3 +1,4 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18179617.svg)](https://doi.org/10.5281/zenodo.18179617)
 # TriHaRd: Higher Resilience for TEE Trusted Time (INFOCOM'26)
 
 This repository contains the source code, as well as deployment and analysis scripts, for the "TriHaRd: Higher Resilience for TEE Trusted Time" paper, accepted for publication at the INFOCOM'26 conference.
